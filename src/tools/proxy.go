@@ -80,45 +80,42 @@ func ProxyResponseHandler() func(*http.Response) error {
 			}
 		}
 
-		// Do some quick fixes to the HTTP response for NPM install requests
-		// Also support for pnpm and bun
-		if strings.HasPrefix(r.Request.UserAgent(), "npm") ||
-			strings.HasPrefix(r.Request.UserAgent(), "pnpm") ||
-			strings.HasPrefix(r.Request.UserAgent(), "Bun") ||
-			strings.Contains(r.Request.UserAgent(), "NuGet") ||
-			strings.Contains(r.Request.UserAgent(), "netfx") {
-
-			// Respond to only requests that respond with JSON
-			// There might eventually be additional headers i don't know about?
-			if !strings.Contains(contentType, "application/json") && !strings.Contains(contentType, "application/vnd.npm.install-v1+json") {
-				return nil
-			}
-
-			var body io.ReadCloser
-
-			if r.Header.Get("Content-Encoding") == "gzip" {
-				body, _ = gzip.NewReader(r.Body)
-				r.Header.Del("Content-Encoding")
-			} else {
-				body = r.Body
-			}
-
-			// replace any instances of the CodeArtifact URL with the local URL
-			oldContentResponse, _ := ioutil.ReadAll(body)
-			oldContentResponseStr := string(oldContentResponse)
-
-			mutex.Lock()
-			resolvedHostname := strings.Replace(CodeArtifactAuthInfo.Url, u.Host, hostname, -1)
-			newUrl := fmt.Sprintf("%s://%s/", originalUrl.Scheme, originalUrl.Host)
-
-			newResponseContent := strings.Replace(oldContentResponseStr, resolvedHostname, newUrl, -1)
-			newResponseContent = strings.Replace(newResponseContent, CodeArtifactAuthInfo.Url, newUrl, -1)
-			mutex.Unlock()
-
-			r.Body = ioutil.NopCloser(strings.NewReader(newResponseContent))
-			r.ContentLength = int64(len(newResponseContent))
-			r.Header.Set("Content-Length", strconv.Itoa(len(newResponseContent)))
+		// Do some quick fixes to the HTTP response; ignore probes and health checks
+		if strings.Contains(strings.ToLower(r.Request.UserAgent()), "probe") ||
+			strings.Contains(strings.ToLower(r.Request.UserAgent()), "health") {
+			return nil
 		}
+
+		// Respond to only requests that respond with JSON
+		// There might eventually be additional headers i don't know about?
+		if !strings.Contains(contentType, "application/json") && !strings.Contains(contentType, "application/vnd.npm.install-v1+json") {
+			return nil
+		}
+
+		var body io.ReadCloser
+
+		if r.Header.Get("Content-Encoding") == "gzip" {
+			body, _ = gzip.NewReader(r.Body)
+			r.Header.Del("Content-Encoding")
+		} else {
+			body = r.Body
+		}
+
+		// replace any instances of the CodeArtifact URL with the local URL
+		oldContentResponse, _ := ioutil.ReadAll(body)
+		oldContentResponseStr := string(oldContentResponse)
+
+		mutex.Lock()
+		resolvedHostname := strings.Replace(CodeArtifactAuthInfo.Url, u.Host, hostname, -1)
+		newUrl := fmt.Sprintf("%s://%s/", originalUrl.Scheme, originalUrl.Host)
+
+		newResponseContent := strings.Replace(oldContentResponseStr, resolvedHostname, newUrl, -1)
+		newResponseContent = strings.Replace(newResponseContent, CodeArtifactAuthInfo.Url, newUrl, -1)
+		mutex.Unlock()
+
+		r.Body = ioutil.NopCloser(strings.NewReader(newResponseContent))
+		r.ContentLength = int64(len(newResponseContent))
+		r.Header.Set("Content-Length", strconv.Itoa(len(newResponseContent)))
 
 		return nil
 	}
